@@ -1,0 +1,33 @@
+
+aws:
+  access_key_id: access_key_id
+  secret_access_key: secret_access_key
+
+email:
+  delivery_method: smtp
+  delivery_options:
+    address: mail.example.com
+    port: 25
+    user_name: user_name
+    password: password
+    enable_stattls_auto: true
+  to: email@example.com
+  from: no-reply@example.com
+
+memcached:
+  servers: 127.0.0.1:11211
+  ttl: 300
+
+zone: example.tld.
+domain: subdomain.example.tld.
+set_identifier: 1
+
+ips:
+  - 1.1.1.1
+  - 2.2.2.2
+  - 3.3.3.3
+
+interval: 30
+timeout: 1
+tries: 3
+

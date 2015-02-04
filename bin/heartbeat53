@@ -1,0 +1,98 @@
+#!/usr/bin/env ruby
+
+require "aws/route_53"
+require "hashr"
+require "yaml"
+require "logger"
+require "mail"
+require "set"
+require "dalli"
+require "json"
+
+Logfile = Logger.new(File.expand_path("../../log/heartbeat53.log", __FILE__), 3, 10_485_760)
+
+module Enumerable
+  def select_parallel(&block)
+    threads = []
+
+    each do |element|
+      threads << Thread.new do
+        block.call(element) ? element : nil
+      end
+    end
+
+    threads.each(&:join).select(&:value).collect(&:value)
+  end
+end
+
+def ping(ip, tries = 3, timeout = 5)
+  tries.times.any? do |i|
+    `ping -W #{timeout} -c 1 #{ip}`
+
+    Logfile.info("ping #{i + 1}/#{tries} of #{ip} failed") unless $?.success?
+
+    $?.success?
+  end 
+end 
+
+threads = Dir[File.expand_path("../../config/*.yml", __FILE__)].collect do |path|
+  Thread.new path do |file|
+    Logfile.info "Reading config #{file}"
+
+    config = Hashr.new(YAML.load_file(file))
+
+    begin
+      route53 = AWS::Route53.new(config.aws)
+      hosted_zone = route53.hosted_zones.detect { |element| element.name == config.zone }
+      resource_record_sets = hosted_zone.resource_record_sets.select { |element| element.name == config.domain }
+      resource_record_set = config.set_identifier ? resource_record_sets.detect { |element| element.set_identifier == config.set_identifier.to_s } : resource_record_sets.first
+
+      dalli = Dalli::Client.new(config.memcached.servers)
+      cache_key = ["heartbeat53", config.zone, config.domain, config.set_identifier].join("/")
+
+      loop do
+        begin
+          available_ips = config.ips.select_parallel { |ip| ping ip, config.tries, config.timeout }
+          existing_ips = dalli.fetch(cache_key, config.memcached.ttl) { puts "fetch"; resource_record_set.resource_records.collect { |element| element[:value] } }
+
+          Logfile.info "Available IPs for #{config.domain}/#{config.set_identifier}: #{available_ips.inspect}"
+          Logfile.info "Existing IPs for #{config.domain}/#{config.set_identifier}: #{existing_ips.inspect}"
+
+          if available_ips.to_set != existing_ips.to_set && available_ips.size > 0
+            Logfile.info "Updating DNS for #{config.domain}/#{config.set_identifier} to: #{available_ips.inspect}"
+
+            resource_record_set.resource_records = available_ips.collect { |ip| { :value => ip } }
+            resource_record_set.update
+
+            dalli.set cache_key, available_ips, config.memcached.ttl
+
+            Logfile.info "Updated DNS for #{config.domain}/#{config.set_identifier} to: #{available_ips.inspect}"
+
+            mail = Mail.new do
+              to config.email.to
+              subject "[heartbeat53] Updated DNS for #{config.domain}/#{config.set_identifier}"
+              from config.email.from
+              body "Updated DNS for #{config.domain}/#{config.set_identifier} from #{existing_ips.inspect} to #{available_ips.inspect}"
+            end
+
+            mail.delivery_method config.email.delivery_method, config.email.delivery_options || {}
+            mail.deliver
+
+            sleep 300
+          else
+            sleep config.interval
+          end
+        rescue => e
+          Logfile.error e
+
+          sleep config.interval
+        end
+      end
+    rescue => e
+      Logfile.error e
+    end
+  end
+end
+
+threads.each(&:join)
+
