@@ -35,7 +35,7 @@ def ping(ip, tries = 3, timeout = 5)
 
     Logfile.info("ping #{i + 1}/#{tries} of #{ip} failed") unless success
 
-    rest = timeout - (Time.now.to_f - start)
+    rest = [timeout - (Time.now.to_f - start), timeout].min
 
     sleep(rest) if rest > 0 && !success
 
