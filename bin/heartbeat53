@@ -25,29 +25,21 @@ module Enumerable
   end
 end
 
-def run_at_least(seconds)
-  start = Time.now.to_f
-
-  result = yield
-
-  rest = seconds - (Time.now.to_f - start)
-
-  sleep(rest) if rest > 0
-
-  result
-end
-
 def ping(ip, tries = 3, timeout = 5)
   tries.times.any? do |i|
-    run_at_least timeout do
-      `ping -W #{timeout} -c 1 #{ip}`
+    start = Time.now.to_f
 
-      success = $?.success?
+    `ping -W #{timeout} -c 1 #{ip}`
 
-      Logfile.info("ping #{i + 1}/#{tries} of #{ip} failed") unless success
+    success = $?.success?
 
-      success
-    end
+    Logfile.info("ping #{i + 1}/#{tries} of #{ip} failed") unless success
+
+    rest = timeout - (Time.now.to_f - start)
+
+    sleep(rest) if rest > 0 && !success
+
+    success
   end 
 end 
 
