@@ -40,8 +40,8 @@ def ping(ip, tries = 3, timeout = 5)
     sleep(rest) if rest > 0 && !success
 
     success
-  end 
-end 
+  end
+end
 
 threads = Dir[File.expand_path("../../config/*.yml", __FILE__)].collect do |path|
   Thread.new path do |file|
